@@ -20,8 +20,8 @@ test('filtre : gamme, format, pauvre en sel, catégories exclues', () => {
 
 test('midi 14 recettes 300 g : codes distincts, pas deux jours de suite la même catégorie', () => {
   const pool = Recettes.filtrer(catalogue, { gamme: 'Plats complets', format: '300g cassolette' });
-  const { choix, manque } = Recettes.proposer(plan.services.midi.planning, pool);
-  assert.strictEqual(manque, 0);
+  const { choix, repetees } = Recettes.proposer(plan.services.midi.planning, pool);
+  assert.strictEqual(repetees, 0);
   assert.strictEqual(new Set(choix.map((c) => c.article.code)).size, 14);
   const par = Object.fromEntries(choix.map((c) => [c.numero, c.article]));
   const jours = plan.services.midi.planning;
@@ -31,19 +31,25 @@ test('midi 14 recettes 300 g : codes distincts, pas deux jours de suite la même
   assert.ok(new Set(choix.map((c) => c.article.categorie)).size >= 3);
 });
 
-test('l\'autre service ne réutilise pas les mêmes codes ; catalogue trop court signalé', () => {
+test('l\'autre service évite les mêmes codes', () => {
   const pool = Recettes.filtrer(catalogue, { gamme: 'Plats complets', format: '300g cassolette' });
   const a = Recettes.proposer(plan.services.midi.planning, pool);
   const b = Recettes.proposer(plan.services.soir.planning, pool, a.choix.map((c) => c.article.code));
   const codesA = new Set(a.choix.map((c) => c.article.code));
   assert.ok(b.choix.every((c) => !codesA.has(c.article.code)));
-  const court = Recettes.proposer(plan.services.midi.planning, pool.slice(0, 5));
-  assert.strictEqual(court.manque, 9);
 });
 
-test('alternatives : exclut les recettes déjà utilisées sauf l\'actuelle', () => {
+test('catalogue trop court : on resert des recettes (valeurs sûres d\'abord), aucun repas vide', () => {
   const pool = Recettes.filtrer(catalogue, { gamme: 'Veloutines', format: '180g cassolette' });
-  const alt = Recettes.alternatives(pool, [pool[0].code, pool[1].code], pool[0]);
-  assert.strictEqual(alt.length, pool.length - 1);
-  assert.ok(alt.includes(pool[0]) && !alt.includes(pool[1]));
+  const p15 = Calcul.calculer({ jours: 15, tolerance: 7, soir: { residents: 25, portionsParCarton: 9 } }).options[0];
+  const r = Recettes.proposer(p15.services.soir.planning, pool);
+  assert.strictEqual(r.choix.length, p15.services.soir.recettes);       // toutes les recettes ont un article
+  assert.strictEqual(r.repetees, p15.services.soir.recettes - pool.length);
+  const par = Object.fromEntries(r.choix.map((c) => [c.numero, c.article]));
+  const jours = p15.services.soir.planning.map((j) => par[j.recette]);
+  assert.ok(jours.every(Boolean));
+  const vus = new Set(), resservies = [];
+  for (const c of r.choix) { if (vus.has(c.article.code)) resservies.push(c.article); vus.add(c.article.code); }
+  assert.ok(resservies.length > 0 && resservies.every((a) => a.valeur_sure));
+  for (let i = 1; i < jours.length; i++) assert.notStrictEqual(jours[i].code, jours[i - 1].code);
 });

@@ -240,6 +240,23 @@
     return { front: fr, options: options.map((o) => Object.assign({ labels: o.labels }, o.entree)) };
   }
 
-  const api = { calculer, simuler, candidatsService, portionsParCarton, portionsParBarquette, serviceDepuisArticle, LIBELLES };
+  // Scénarios présentés à l'utilisatrice (sans saisir de tolérance) : pour chaque nombre
+  // max de résidents sur un reste, le plan le plus varié (puis le moins de pertes).
+  // On garde les scénarios distincts et non dominés, du « zéro repas mixte » au plus économe.
+  const TOLERANCES = [0, 1, 2, 3, 4, 5, 7, 10];
+  function scenarios(params) {
+    const N = Math.max(...['midi', 'soir'].map((n) => (params[n] && params[n].residents) || 0));
+    const liste = [];
+    for (const t of TOLERANCES.filter((t) => t < N)) {
+      const fr = front(params, t);
+      if (!fr.length) continue;
+      const e = fr[0];
+      const resteMax = Math.max(0, ...Object.values(e.services).flatMap((s) => s.planning.map((j) => j.residentsSurReste)));
+      liste.push(Object.assign({ resteMax }, e));
+    }
+    return pareto(liste, (x) => x).sort((a, b) => a.resteMax - b.resteMax);
+  }
+
+  const api = { calculer, scenarios, simuler, candidatsService, portionsParCarton, portionsParBarquette, serviceDepuisArticle, LIBELLES };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Calcul = api;
 })(typeof self !== 'undefined' ? self : this);

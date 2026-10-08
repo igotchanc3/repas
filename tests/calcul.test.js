@@ -107,3 +107,11 @@ test('catalogue.json : champs et colisages', () => {
   assert.ok(catalogue.filter((a) => a.format.startsWith('300g') || a.format.startsWith('200g')).every((a) => a.portions_par_carton === 6));
   assert.ok(catalogue.filter((a) => a.multiportion).every((a) => a.barquettes_par_carton === 2 && a.portions_par_carton === null));
 });
+
+test('scénarios : du zéro repas mixte au plus économe, sans saisir de tolérance', () => {
+  const sc = Calcul.scenarios({ jours: 14, midi: { residents: 25, portionsParCarton: 6 }, soir: { residents: 25, portionsParCarton: 9 } });
+  assert.ok(sc.length >= 2);
+  assert.deepStrictEqual([sc[0].resteMax, sc[0].repasMixtes, sc[0].recettes, sc[0].cartons, sc[0].pertes], [0, 0, 28, 112, 98]);
+  assert.ok(sc.some((s) => s.recettes === 28 && s.cartons === 98 && s.pertes === 5));   // cas du §5
+  for (let i = 1; i < sc.length; i++) assert.ok(sc[i].pertes < sc[i - 1].pertes);        // plus de restes servis = moins de pertes
+});
