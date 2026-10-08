@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calculateur de commande Nutrisens</title>
+<style>
+  :root { --fond:#f6f7f4; --carte:#fff; --texte:#1f2a24; --doux:#66736b; --trait:#dfe4dd; --vert:#2f7d4f; --vert-clair:#e6f2ea; --alerte:#b3541e; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--fond); color:var(--texte); font:15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { background:var(--vert); color:#fff; padding:14px 28px; }
+  header h1 { margin:0; font-size:20px; } header p { margin:2px 0 0; opacity:.85; font-size:13px; }
+  main { max-width:1280px; margin:0 auto; padding:20px 28px 60px; display:grid; grid-template-columns:380px 1fr; gap:20px; align-items:start; }
+  section, aside { background:var(--carte); border:1px solid var(--trait); border-radius:10px; padding:16px 18px; }
+  aside { position:sticky; top:12px; }
+  h2 { margin:0 0 10px; font-size:16px; } h3 { margin:14px 0 6px; font-size:14px; }
+  label { display:block; font-size:13px; color:var(--doux); margin:8px 0 2px; }
+  input[type=text], input[type=number], input[type=date], select { width:100%; padding:6px 8px; border:1px solid var(--trait); border-radius:6px; font:inherit; background:#fff; }
+  .ligne { display:flex; gap:8px; } .ligne > * { flex:1; }
+  .jours { display:flex; gap:4px; flex-wrap:wrap; } .jours label { display:flex; align-items:center; gap:3px; margin:0; color:var(--texte); border:1px solid var(--trait); border-radius:6px; padding:3px 7px; cursor:pointer; }
+  .service { border:1px solid var(--trait); border-radius:8px; padding:8px 12px 12px; margin-top:10px; }
+  .service > label:first-child { color:var(--texte); font-weight:600; font-size:14px; display:flex; gap:6px; align-items:center; margin:0; }
+  .cats { display:flex; gap:10px; flex-wrap:wrap; } .cats label { display:flex; gap:4px; align-items:center; margin:0; color:var(--texte); }
+  button { font:inherit; border:1px solid var(--vert); background:var(--vert); color:#fff; border-radius:7px; padding:8px 14px; cursor:pointer; }
+  button.sec { background:#fff; color:var(--vert); } button:hover { filter:brightness(.95); }
+  table { border-collapse:collapse; width:100%; font-size:14px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--trait); vertical-align:top; }
+  th { font-size:12px; text-transform:uppercase; letter-spacing:.03em; color:var(--doux); }
+  td.n, th.n { text-align:right; font-variant-numeric:tabular-nums; }
+  tr.choisi { background:var(--vert-clair); } tr.cliquable { cursor:pointer; } tr.cliquable:hover { background:#f0f5f1; }
+  .note { color:var(--doux); font-size:13px; } .erreur { color:var(--alerte); }
+  .pile { display:grid; gap:20px; } .barre { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+  .tag { display:inline-block; font-size:12px; background:var(--vert-clair); color:var(--vert); border-radius:10px; padding:1px 8px; margin-right:4px; }
+  .reste { color:var(--alerte); } select.rempl { width:auto; max-width:330px; }
+  @media (max-width:1000px) { main { grid-template-columns:1fr; } aside { position:static; } }
+  @media print { header, aside, .barre, .noprint { display:none !important; } main { display:block; padding:0; } section { border:none; padding:0; } body { background:#fff; } select.rempl { border:none; appearance:none; } }
+</style>
+</head>
+<body>
+<header><h1>Calculateur de commande Nutrisens — produits frais</h1><p>Combien de cartons commander, et quelles recettes, pour une période donnée.</p></header>
+<main>
+<aside>
+  <h2>Paramètres</h2>
+  <label for="etab">Établissement</label>
+  <input type="text" id="etab" placeholder="Nom de l'établissement">
+  <div class="ligne">
+    <div><label for="livraison">Date de livraison</label><input type="date" id="livraison"></div>
+    <div><label for="dlc">DLC résiduelle</label><select id="dlc"><option value="15">15 jours</option><option value="18">18 jours</option></select></div>
+  </div>
+  <label>Jours de service</label>
+  <div class="jours" id="jours"></div>
+  <p class="note" id="infoJ"></p>
+
+  <div class="service" id="svc-midi"></div>
+  <div class="service" id="svc-soir"></div>
+
+  <label for="tol">Tolérance repas mixtes : <b id="tolVal">0</b> résident(s) max sur un reste</label>
+  <input type="range" id="tol" min="0" max="15" value="0" style="width:100%">
+
+  <h3>Options</h3>
+  <label style="display:flex;gap:6px;align-items:center;color:var(--texte)"><input type="checkbox" id="sel"> Pauvre en sel uniquement</label>
+  <label>Exclure des catégories</label>
+  <div class="cats" id="cats"></div>
+  <p><button id="go">Calculer</button></p>
+  <p class="note erreur" id="erreur"></p>
+</aside>
+
+<div class="pile" id="resultats" hidden>
+  <section>
+    <h2>1 · Comparatif des options</h2>
+    <p class="note">Clique une ligne pour choisir l'option.</p>
+    <table id="tabOptions"></table>
+    <h3>Impact de la tolérance (variété max)</h3>
+    <table id="tabTol"></table>
+  </section>
+  <section>
+    <h2>2 · Bon de commande</h2>
+    <div class="barre noprint">
+      <button class="sec" id="copier">Copier</button><button class="sec" id="csv">Exporter CSV</button><button class="sec" id="imprimer">Imprimer / PDF</button>
+      <span class="note" id="msg"></span>
+    </div>
+    <h2 id="titreImpr" hidden></h2>
+    <table id="tabBon"></table>
+    <p class="note" id="totaux"></p>
+  </section>
+  <section>
+    <h2>3 · Planning jour par jour</h2>
+    <table id="tabPlanning"></table>
+  </section>
+</div>
+</main>
+
+<script>window.CATALOGUE = [{"code":"VEAA02","libelle":"VEAU CAROTTES","gamme":"Veloutines","format":"180g cassolette","portions_par_carton":9,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"VEAA04","libelle":"BOEUF PRINTANIER","gamme":"Veloutines","format":"180g cassolette","portions_par_carton":9,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"VEAA05","libelle":"DINDE A LA MEDITERRANÉENNE","gamme":"Veloutines","format":"180g cassolette","portions_par_carton":9,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"VEAA13","libelle":"TAJINE DE POULET","gamme":"Veloutines","format":"180g cassolette","portions_par_carton":9,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"VEAA15","libelle":"SAUMON AUX ÉPINARDS","gamme":"Veloutines","format":"180g cassolette","portions_par_carton":9,"categorie":"mer","pauvre_en_sel":false,"duo":false},{"code":"VEAA16","libelle":"POISSON FACON PARMENTIERE","gamme":"Veloutines","format":"180g cassolette","portions_par_carton":9,"categorie":"mer","pauvre_en_sel":false,"duo":false},{"code":"VEAA17","libelle":"COURGETTES ŒUFS FROMAGE","gamme":"Veloutines","format":"180g cassolette","portions_par_carton":9,"categorie":"végétarien","pauvre_en_sel":false,"duo":false},{"code":"VEAA19","libelle":"CANARD POMME DE TERRE","gamme":"Veloutines","format":"180g cassolette","portions_par_carton":9,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"VEAA22","libelle":"GRATIN DE CHOU-FLEUR AU JAMBON","gamme":"Veloutines","format":"180g cassolette","portions_par_carton":9,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"VEAA23","libelle":"PATES AUX ÉPINARDS","gamme":"Veloutines","format":"180g cassolette","portions_par_carton":9,"categorie":"pâtes","pauvre_en_sel":false,"duo":false},{"code":"VEAA24","libelle":"CAROTTES LENTILLES AU CUMIN","gamme":"Veloutines","format":"180g cassolette","portions_par_carton":9,"categorie":"végétarien","pauvre_en_sel":false,"duo":false},{"code":"VEAA25","libelle":"POULET ET PETITS LÉGUMES","gamme":"Veloutines","format":"180g cassolette","portions_par_carton":9,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"VEAA26","libelle":"QUICHE LORRAINE","gamme":"Veloutines","format":"180g cassolette","portions_par_carton":9,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"PHIA01","libelle":"ŒUFS ET POMMES DE TERRE À LA MUSCADE","gamme":"Plats complets","format":"200g assiette","portions_par_carton":6,"categorie":"végétarien","pauvre_en_sel":false,"duo":false},{"code":"PHIA03","libelle":"CANARD ET DINDE AUX LENTILLES","gamme":"Plats complets","format":"200g assiette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"PHIA04","libelle":"JAMBON PURÉE","gamme":"Plats complets","format":"200g assiette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"PHIA05","libelle":"PORC ET SA JARDINIÈRE DE LÉGUMES","gamme":"Plats complets","format":"200g assiette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"PHIA08","libelle":"POISSON BLANC A LA PROVENÇALE","gamme":"Plats complets","format":"200g assiette","portions_par_carton":6,"categorie":"mer","pauvre_en_sel":false,"duo":false},{"code":"PHIA10","libelle":"OEUF CHOU FLEUR À LA CRÈME","gamme":"Plats complets","format":"200g assiette","portions_par_carton":6,"categorie":"végétarien","pauvre_en_sel":false,"duo":false},{"code":"PSIA17","libelle":"SOUFFLÉ AUX 2 FROMAGES","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"végétarien","pauvre_en_sel":false,"duo":false},{"code":"PSIA20","libelle":"CHOUCROUTE","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"PSIA22","libelle":"PAELLA","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"ailleurs","pauvre_en_sel":false,"duo":false},{"code":"PSIA25","libelle":"CURRY DE POULET AUX CAROTTES ET OIGNONS","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"PSIA26","libelle":"POIVRONS FARCIS A LA DINDE","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"PSIA31","libelle":"PATES BOLOGNAISE","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"pâtes","pauvre_en_sel":false,"duo":false},{"code":"PSIA33","libelle":"CASSOULET","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"PSIA39","libelle":"PATES BASILIC GRANA PADANO","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"pâtes","pauvre_en_sel":false,"duo":false},{"code":"PSIA40","libelle":"PATES A LA SAUCE TOMATE","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"pâtes","pauvre_en_sel":false,"duo":false},{"code":"PSIA41","libelle":"PATES A LA CARBONARA","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"pâtes","pauvre_en_sel":false,"duo":false},{"code":"PSIA42","libelle":"SAUTÉ DE PORC AU CHOU ROUGE","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"PSIA44","libelle":"ŒUFS CHOU-FLEUR A LA BÉCHAMEL","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"végétarien","pauvre_en_sel":false,"duo":false},{"code":"PSIA45","libelle":"PARMENTIER DE LA MER","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"mer","pauvre_en_sel":false,"duo":false},{"code":"PSIA47","libelle":"ENDIVES AU JAMBON","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"PSIA48","libelle":"TOMATES FARCIES","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"PSIA50","libelle":"PARMENTIER DE BOEUF","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"PSIA51","libelle":"QUICHE JAMBON","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"PSIA52","libelle":"POISSON CUISINE ET SON RIZ","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"mer","pauvre_en_sel":false,"duo":false},{"code":"PSIA54","libelle":"BLANQUETTE DE VEAU ET RIZ","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"PSIA59","libelle":"POISSON BROCOLIS CITRON","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"mer","pauvre_en_sel":false,"duo":false},{"code":"PSIA60","libelle":"POISSON BLANC CAROTTES ESTRAGON","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"mer","pauvre_en_sel":false,"duo":false},{"code":"PSIA61","libelle":"PORC ET SA JARDINIÈRE DE LÉGUMES","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"PSIC01","libelle":"ŒUF ET POMMES DE TERRE À LA MUSCADE","gamme":"Plats complets","format":"300g assiette","portions_par_carton":6,"categorie":"végétarien","pauvre_en_sel":false,"duo":false},{"code":"PSIC03","libelle":"CANARD LENTILLES","gamme":"Plats complets","format":"300g assiette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"PSIC09","libelle":"DINDE RIZ","gamme":"Plats complets","format":"300g assiette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"21102","libelle":"OEUFS À LA FLORENTINE","gamme":"Plats complets","format":"300g assiette","portions_par_carton":6,"categorie":"végétarien","pauvre_en_sel":false,"duo":false},{"code":"70938","libelle":"TAJINE DE POULET","gamme":"Plats complets","format":"300g assiette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":false},{"code":"PHID01","libelle":"BOEUF EN DAUBE","gamme":"Plats complets","format":"200g assiette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":true},{"code":"PHID06","libelle":"ŒUFS RATATOUILLE","gamme":"Plats complets","format":"200g assiette","portions_par_carton":6,"categorie":"végétarien","pauvre_en_sel":false,"duo":true},{"code":"PHID07","libelle":"HACHIS PARMENTIER","gamme":"Plats complets","format":"200g assiette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":true},{"code":"PHID08","libelle":"DINDE AUX PETITS LÉGUMES","gamme":"Plats complets","format":"200g assiette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":true},{"code":"PHID09","libelle":"VEAU VALLÉE D’AUGE","gamme":"Plats complets","format":"200g assiette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":true},{"code":"PHID10","libelle":"BŒUF RÔTI HARICOTS VERTS","gamme":"Plats complets","format":"200g assiette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":true},{"code":"PHID11","libelle":"POISSON ÉPINARDS","gamme":"Plats complets","format":"200g assiette","portions_par_carton":6,"categorie":"mer","pauvre_en_sel":false,"duo":true},{"code":"PHID12","libelle":"POULET RÔTI HARICOTS VERTS","gamme":"Plats complets","format":"200g assiette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":true},{"code":"PSID30","libelle":"BOEUF BOURGUIGNON POMMES DE TERRE","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":true},{"code":"PSID39","libelle":"CANARD A L’ORANGE, PURÉE DE CAROTTES","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":true},{"code":"PSID42","libelle":"BOUDIN NOIR AUX POMMES","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":true},{"code":"PSID46","libelle":"POULET RÔTI HARICOTS VERTS","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":true},{"code":"PSIG02","libelle":"BOEUF DAUBE","gamme":"Plats complets","format":"300g assiette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":true},{"code":"PSIG06","libelle":"VEAU AUX LÉGUMES","gamme":"Plats complets","format":"300g assiette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":true},{"code":"PSIG09","libelle":"PAUPIETTE DE VEAU ET DINDE À LA TOMATE","gamme":"Plats complets","format":"300g assiette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":true},{"code":"PSIG10","libelle":"POULET BROCOLIS ET CHAMPIGNONS","gamme":"Plats complets","format":"300g assiette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":true},{"code":"PSIG11","libelle":"POISSON ÉPINARDS","gamme":"Plats complets","format":"300g assiette","portions_par_carton":6,"categorie":"mer","pauvre_en_sel":false,"duo":true},{"code":"PSIG12","libelle":"DINDE PETITS LÉGUMES","gamme":"Plats complets","format":"300g assiette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":true},{"code":"PSIG13","libelle":"BOEUF RÔTI HARICOTS VERTS","gamme":"Plats complets","format":"300g assiette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":false,"duo":true},{"code":"28020","libelle":"ŒUF RATATOUILLE","gamme":"Plats complets","format":"300g assiette","portions_par_carton":6,"categorie":"végétarien","pauvre_en_sel":false,"duo":true},{"code":"PSIH34","libelle":"BŒUF RÔTI HARICOTS VERTS","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":true,"duo":false},{"code":"PSIH35","libelle":"POISSON BLANC ÉPINARDS","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"mer","pauvre_en_sel":true,"duo":false},{"code":"PSIH36","libelle":"DINDE PETITS LÉGUMES","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":true,"duo":false},{"code":"PSIH37","libelle":"POULET RÔTI HARICOTS VERTS","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":true,"duo":false},{"code":"PSIS67","libelle":"DINDE ET SON RIZ","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":true,"duo":false},{"code":"PSIS74","libelle":"ŒUFS À LA FLORENTINE","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"végétarien","pauvre_en_sel":true,"duo":false},{"code":"PSIS83","libelle":"DINDE AUX CAROTTES","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":true,"duo":false},{"code":"PSIS85","libelle":"PORC CHOU ROUGE","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"terre","pauvre_en_sel":true,"duo":false},{"code":"PSIS86","libelle":"ŒUF CHOU FLEUR À LA CRÈME","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"végétarien","pauvre_en_sel":true,"duo":false},{"code":"PSIS87","libelle":"POISSON BROCOLIS ET CITRON","gamme":"Plats complets","format":"300g cassolette","portions_par_carton":6,"categorie":"mer","pauvre_en_sel":true,"duo":false},{"code":"PSMA62","libelle":"POULET AU CÉLERI","gamme":"Plats complets","format":"barquette 1kg","portions_par_carton":null,"categorie":"terre","pauvre_en_sel":false,"duo":false,"multiportion":true,"barquettes_par_carton":2,"poids_barquette_g":1000},{"code":"PSMA63","libelle":"POMMES DE TERRE AUX DEUX FROMAGES","gamme":"Plats complets","format":"barquette 1kg","portions_par_carton":null,"categorie":"végétarien","pauvre_en_sel":false,"duo":false,"multiportion":true,"barquettes_par_carton":2,"poids_barquette_g":1000},{"code":"PSMA66","libelle":"TAJINE DE POULET","gamme":"Plats complets","format":"barquette 1kg","portions_par_carton":null,"categorie":"terre","pauvre_en_sel":false,"duo":false,"multiportion":true,"barquettes_par_carton":2,"poids_barquette_g":1000},{"code":"PSMA67","libelle":"DINDE ET SON RIZ","gamme":"Plats complets","format":"barquette 1kg","portions_par_carton":null,"categorie":"terre","pauvre_en_sel":false,"duo":false,"multiportion":true,"barquettes_par_carton":2,"poids_barquette_g":1000},{"code":"PSMA68","libelle":"PÂTES À LA BOLOGNAISE","gamme":"Plats complets","format":"barquette 1kg","portions_par_carton":null,"categorie":"pâtes","pauvre_en_sel":false,"duo":false,"multiportion":true,"barquettes_par_carton":2,"poids_barquette_g":1000},{"code":"PSMA69","libelle":"CANARD ET DINDE AUX LENTILLES","gamme":"Plats complets","format":"barquette 1kg","portions_par_carton":null,"categorie":"terre","pauvre_en_sel":false,"duo":false,"multiportion":true,"barquettes_par_carton":2,"poids_barquette_g":1000},{"code":"PSMA70","libelle":"ŒUFS ET POMMES DE TERRE À LA MUSCADE","gamme":"Plats complets","format":"barquette 1kg","portions_par_carton":null,"categorie":"végétarien","pauvre_en_sel":false,"duo":false,"multiportion":true,"barquettes_par_carton":2,"poids_barquette_g":1000},{"code":"PSMA72","libelle":"PÂTES À LA CARBONARA","gamme":"Plats complets","format":"barquette 1kg","portions_par_carton":null,"categorie":"pâtes","pauvre_en_sel":false,"duo":false,"multiportion":true,"barquettes_par_carton":2,"poids_barquette_g":1000},{"code":"PSMA73","libelle":"PORC ET SA JARDINIÈRE DE LÉGUMES","gamme":"Plats complets","format":"barquette 1kg","portions_par_carton":null,"categorie":"terre","pauvre_en_sel":false,"duo":false,"multiportion":true,"barquettes_par_carton":2,"poids_barquette_g":1000},{"code":"PSMA74","libelle":"ŒUFS À LA FLORENTINE","gamme":"Plats complets","format":"barquette 1kg","portions_par_carton":null,"categorie":"végétarien","pauvre_en_sel":false,"duo":false,"multiportion":true,"barquettes_par_carton":2,"poids_barquette_g":1000},{"code":"PSMA77","libelle":"TOMATES FARCIES","gamme":"Plats complets","format":"barquette 1kg","portions_par_carton":null,"categorie":"terre","pauvre_en_sel":false,"duo":false,"multiportion":true,"barquettes_par_carton":2,"poids_barquette_g":1000},{"code":"PSMA79","libelle":"BŒUF HARICOTS VERTS","gamme":"Plats complets","format":"barquette 1kg","portions_par_carton":null,"categorie":"terre","pauvre_en_sel":false,"duo":false,"multiportion":true,"barquettes_par_carton":2,"poids_barquette_g":1000},{"code":"PSMA80","libelle":"JAMBON PURÉE","gamme":"Plats complets","format":"barquette 1kg","portions_par_carton":null,"categorie":"terre","pauvre_en_sel":false,"duo":false,"multiportion":true,"barquettes_par_carton":2,"poids_barquette_g":1000},{"code":"PSMA81","libelle":"POISSON BLANC AUX POIREAUX","gamme":"Plats complets","format":"barquette 1kg","portions_par_carton":null,"categorie":"mer","pauvre_en_sel":false,"duo":false,"multiportion":true,"barquettes_par_carton":2,"poids_barquette_g":1000},{"code":"PSMA82","libelle":"POISSON BLANC À LA DIEPPOISE","gamme":"Plats complets","format":"barquette 1kg","portions_par_carton":null,"categorie":"mer","pauvre_en_sel":false,"duo":false,"multiportion":true,"barquettes_par_carton":2,"poids_barquette_g":1000},{"code":"PSMA83","libelle":"RIZ PETITS LÉGUMES ET PARMESAN","gamme":"Plats complets","format":"barquette 1kg","portions_par_carton":null,"categorie":"végétarien","pauvre_en_sel":false,"duo":false,"multiportion":true,"barquettes_par_carton":2,"poids_barquette_g":1000},{"code":"PSMA86","libelle":"BŒUF STROGANOFF","gamme":"Plats complets","format":"barquette 1kg","portions_par_carton":null,"categorie":"terre","pauvre_en_sel":false,"duo":false,"multiportion":true,"barquettes_par_carton":2,"poids_barquette_g":1000},{"code":"PSMA87","libelle":"POULET AU CURRY","gamme":"Plats complets","format":"barquette 1kg","portions_par_carton":null,"categorie":"terre","pauvre_en_sel":false,"duo":false,"multiportion":true,"barquettes_par_carton":2,"poids_barquette_g":1000},{"code":"PSMA89","libelle":"POISSON BROCOLIS CITRON","gamme":"Plats complets","format":"barquette 1kg","portions_par_carton":null,"categorie":"mer","pauvre_en_sel":false,"duo":false,"multiportion":true,"barquettes_par_carton":2,"poids_barquette_g":1000},{"code":"PSMA90","libelle":"VEAU VALLÉE D’AUGE","gamme":"Plats complets","format":"barquette 1kg","portions_par_carton":null,"categorie":"terre","pauvre_en_sel":false,"duo":false,"multiportion":true,"barquettes_par_carton":2,"poids_barquette_g":1000},{"code":"PSMA92","libelle":"PAËLLA","gamme":"Plats complets","format":"barquette 1kg","portions_par_carton":null,"categorie":"ailleurs","pauvre_en_sel":false,"duo":false,"multiportion":true,"barquettes_par_carton":2,"poids_barquette_g":1000}];</script>
+<script>/* calcul.js — logique pure du calculateur de commande (SPEC §5).
+ * Fonctionne tel quel dans le navigateur (window.Calcul) et sous Node (require).
+ *
+ * Modèle, par service (midi / soir traités indépendamment) :
+ *   N résidents, J jours, C portions par carton, M = tolérance « repas mixtes ».
+ *   Une recette = un nombre de cartons + un nombre de jours où elle est « plat du jour ».
+ *   Chaque jour, le plat du jour sert N-M..N résidents ; le complément (≤ M) est pris
+ *   sur les restes de recettes déjà ouvertes les jours précédents (plus ancien d'abord).
+ *   Barquettes 1 kg : un reste n'est utilisable que le jour d'ouverture et le lendemain.
+ */
+(function (root) {
+  'use strict';
+
+  const LIBELLES = {
+    'variete-max': 'Variété max',
+    'zero-perte': 'Zéro perte',
+    'zero-repas-mixte': 'Zéro repas mixte',
+    'compromis': 'Compromis',
+  };
+
+  /* ---------- Catalogue -> configuration de service ---------- */
+
+  // Barquette 1 kg : portions par barquette = floor(1000 / grammage) ; carton de 2.
+  function portionsParBarquette(grammage) {
+    return Math.floor(1000 / grammage);
+  }
+
+  function portionsParCarton(article, grammage) {
+    if (article.multiportion) {
+      if (!(grammage > 0)) throw new Error('Grammage requis pour une barquette 1 kg');
+      return article.barquettes_par_carton * portionsParBarquette(grammage);
+    }
+    return article.portions_par_carton;
+  }
+
+  // { residents, portionsParCarton, portionsParBarquette? } à partir d'un article du catalogue.
+  function serviceDepuisArticle(article, residents, grammage) {
+    const s = { residents, portionsParCarton: portionsParCarton(article, grammage) };
+    if (article.multiportion) s.portionsParBarquette = portionsParBarquette(grammage);
+    return s;
+  }
+
+  /* ---------- Simulation d'un service pour une répartition donnée ---------- */
+
+  // recettes : [{cartons, jours}] — renvoie le planning, ou null si infaisable avec la tolérance M.
+  function simuler(cfg, J, M, recettes) {
+    const N = cfg.residents, C = cfg.portionsParCarton, B = cfg.portionsParBarquette || 0;
+    const minPropre = Math.max(0, N - M);
+    const recs = recettes.map((r, id) => ({
+      id, cartons: r.cartons, jours: r.jours,
+      P: r.cartons * C, R: r.cartons * C, futurs: r.jours,
+      lots: [], nonOuvertes: B ? Math.round(r.cartons * C / B) : 0,
+      jourService: [], consomme: 0,
+    }));
+
+    // Ordre : recettes à plus gros surplus d'abord (elles fournissent les restes).
+    const ordre = recs.slice().sort((a, b) => (b.P - N * b.jours) - (a.P - N * a.jours) || a.id - b.id);
+    const sequence = [];
+    if (B) {
+      for (const r of ordre) for (let k = 0; k < r.jours; k++) sequence.push(r);   // jours consécutifs (48 h)
+    } else {
+      const max = Math.max(...recs.map((r) => r.jours));
+      for (let k = 0; k < max; k++) for (const r of ordre) if (r.jours > k) sequence.push(r);  // espacés
+    }
+    if (sequence.length !== J) return null;
+
+    const planning = [];
+    for (let t = 1; t <= J; t++) {
+      const rec = sequence[t - 1];
+      for (const r of recs) for (const lot of r.lots) if (lot.expire < t && lot.restant > 0) { r.R -= lot.restant; lot.restant = 0; }
+      rec.futurs--;
+
+      const propre = Math.min(N, rec.R - minPropre * rec.futurs);
+      if (propre < minPropre) return null;
+
+      // Portions propres : lots déjà ouverts, puis nouvelle ouverture.
+      let reste = propre;
+      for (const lot of rec.lots) {
+        if (reste === 0) break;
+        const q = Math.min(reste, lot.restant);
+        lot.restant -= q; rec.R -= q; reste -= q;
+      }
+      while (reste > 0) {
+        let lot;
+        if (B) {
+          if (rec.nonOuvertes <= 0) return null;
+          rec.nonOuvertes--;
+          lot = { restant: B, ouvert: t, expire: t + 1 };
+        } else {
+          lot = { restant: rec.R, ouvert: t, expire: Infinity };
+        }
+        rec.lots.push(lot);
+        const q = Math.min(reste, lot.restant);
+        lot.restant -= q; rec.R -= q; reste -= q;
+        if (!B) break;
+      }
+      rec.consomme += propre;
+      rec.jourService.push(t);
+
+      // Complément sur les restes des autres recettes (déjà ouvertes avant t), plus anciens d'abord.
+      let besoin = N - propre;
+      const servis = [{ recette: rec.id, residents: propre, type: 'plat' }];
+      if (besoin > 0) {
+        const sources = [];
+        for (const r of recs) {
+          if (r === rec) continue;
+          const plafond = r.R - N * r.futurs;               // on garde de quoi servir ses jours futurs
+          if (plafond <= 0) continue;
+          sources.push({ r, plafond, lots: r.lots.filter((l) => l.restant > 0 && l.ouvert < t && l.expire >= t) });
+        }
+        const lots = [];
+        for (const s of sources) for (const l of s.lots) lots.push({ s, l });
+        lots.sort((a, b) => a.l.ouvert - b.l.ouvert || a.s.r.id - b.s.r.id);
+        const prisPar = new Map();
+        for (const { s, l } of lots) {
+          if (besoin === 0) break;
+          const deja = s.deja || 0;
+          const q = Math.min(besoin, l.restant, s.plafond - deja);
+          if (q <= 0) continue;
+          l.restant -= q; s.r.R -= q; s.r.consomme += q; s.deja = deja + q; besoin -= q;
+          prisPar.set(s.r.id, (prisPar.get(s.r.id) || 0) + q);
+        }
+        if (besoin > 0) return null;
+        for (const [id, q] of prisPar) servis.push({ recette: id, residents: q, type: 'reste' });
+      }
+      planning.push({ jour: t, recette: rec.id, servis, residentsSurReste: N - propre });
+    }
+
+    // Numérotation des recettes par ordre de première apparition.
+    const rang = new Map();
+    planning.forEach((j) => { if (!rang.has(j.recette)) rang.set(j.recette, rang.size + 1); });
+    const num = (id) => rang.get(id);
+    const cartons = recs.reduce((s, r) => s + r.cartons, 0);
+    const portions = cartons * C;
+    return {
+      recettes: recs.length,
+      cartons,
+      portions,
+      pertes: portions - N * J,
+      repasMixtes: planning.filter((j) => j.residentsSurReste > 0).length,
+      residentsSurReste: planning.reduce((s, j) => s + j.residentsSurReste, 0),
+      detail: recs.map((r) => ({ numero: num(r.id), cartons: r.cartons, portions: r.P, jours: r.jourService, pertes: r.P - r.consomme })).sort((a, b) => a.numero - b.numero),
+      planning: planning.map((j) => ({
+        jour: j.jour, recette: num(j.recette), residentsSurReste: j.residentsSurReste,
+        servis: j.servis.map((s) => ({ recette: num(s.recette), residents: s.residents, type: s.type })),
+      })),
+    };
+  }
+
+  /* ---------- Génération des candidats d'un service ---------- */
+
+  // Répartit T cartons entre des recettes de poids `jours`, au moins 1 carton chacune (plus grand reste).
+  function repartir(T, jours) {
+    const r = jours.length, W = jours.reduce((a, b) => a + b, 0), libre = T - r;
+    const base = jours.map((d) => Math.floor(libre * d / W));
+    let manque = libre - base.reduce((a, b) => a + b, 0);
+    const ordre = jours.map((d, i) => ({ i, frac: (libre * d) % W })).sort((a, b) => b.frac - a.frac || a.i - b.i);
+    for (let k = 0; manque > 0; k++, manque--) base[ordre[k].i]++;
+    return base.map((b) => b + 1);
+  }
+
+  function dominePar(a, b) {   // b domine a ?
+    return b.recettes >= a.recettes && b.pertes <= a.pertes && b.repasMixtes <= a.repasMixtes &&
+      (b.recettes > a.recettes || b.pertes < a.pertes || b.repasMixtes < a.repasMixtes);
+  }
+
+  function pareto(liste, cle) {
+    const out = [];
+    const vus = new Set();
+    for (const x of liste) {
+      const k = cle(x).recettes + '|' + cle(x).pertes + '|' + cle(x).repasMixtes;
+      if (vus.has(k)) continue;
+      if (liste.some((y) => dominePar(cle(x), cle(y)))) continue;
+      vus.add(k); out.push(x);
+    }
+    return out;
+  }
+
+  function candidatsService(cfg, J, M) {
+    const N = cfg.residents, C = cfg.portionsParCarton;
+    const K = Math.ceil(N * J / C);
+    const Tmax = Math.max(K, J * Math.ceil(N / C));      // au-delà, plus aucun gain possible
+    const res = [];
+    for (let r = 1; r <= J; r++) {
+      const jours = Array.from({ length: r }, (_, i) => Math.floor(J / r) + (i < J % r ? 1 : 0));
+      for (let T = Math.max(K, r); T <= Tmax; T++) {
+        const cartons = repartir(T, jours);
+        const s = simuler(cfg, J, M, cartons.map((c, i) => ({ cartons: c, jours: jours[i] })));
+        if (s) res.push(s);
+      }
+    }
+    return pareto(res, (x) => x);
+  }
+
+  /* ---------- Combinaison midi + soir, options ---------- */
+
+  function sommer(parts) {
+    const t = { recettes: 0, cartons: 0, pertes: 0, repasMixtes: 0, residentsSurReste: 0 };
+    for (const p of Object.values(parts)) for (const k of Object.keys(t)) t[k] += p[k];
+    return t;
+  }
+
+  function front(params, M) {
+    const noms = ['midi', 'soir'].filter((n) => params[n] && params[n].residents > 0);
+    if (!noms.length) return [];
+    let combos = [{}];
+    for (const n of noms) {
+      const cands = candidatsService(params[n], params.jours, M);
+      combos = combos.flatMap((c) => cands.map((x) => Object.assign({}, c, { [n]: x })));
+    }
+    const entrees = combos.map((services) => Object.assign({ services }, sommer(services)));
+    return pareto(entrees, (x) => x).sort((a, b) => b.recettes - a.recettes || a.pertes - b.pertes || a.repasMixtes - b.repasMixtes);
+  }
+
+  // Point du front le plus proche du « meilleur de chaque critère » (valeurs normalisées 0-1).
+  function compromis(fr) {
+    const rng = (f) => { const v = fr.map(f); return [Math.min(...v), Math.max(...v)]; };
+    const [r0, r1] = rng((x) => x.recettes), [p0, p1] = rng((x) => x.pertes), [m0, m1] = rng((x) => x.repasMixtes);
+    const n = (v, a, b) => (b === a ? 0 : (v - a) / (b - a));
+    const score = (x) => n(r0 + r1 - x.recettes, r0, r1) + n(x.pertes, p0, p1) + n(x.repasMixtes, m0, m1);
+    return fr.reduce((best, x) => (score(x) < score(best) - 1e-9 ? x : best), fr[0]);
+  }
+
+  function calculer(params) {
+    const M = params.tolerance || 0;
+    const fr = front(params, M);
+    if (!fr.length) return { front: [], options: [] };
+    const frZero = M === 0 ? fr : front(params, 0);
+    const choix = [
+      ['variete-max', fr[0]],
+      ['zero-perte', fr.slice().sort((a, b) => a.pertes - b.pertes || b.recettes - a.recettes || a.repasMixtes - b.repasMixtes)[0]],
+      ['zero-repas-mixte', compromis(frZero)],
+      ['compromis', compromis(fr)],
+    ];
+    const options = [];
+    for (const [label, e] of choix) {
+      const deja = options.find((o) => o.entree === e);
+      if (deja) deja.labels.push(label); else options.push({ labels: [label], entree: e });
+    }
+    return { front: fr, options: options.map((o) => Object.assign({ labels: o.labels }, o.entree)) };
+  }
+
+  const api = { calculer, simuler, candidatsService, portionsParCarton, portionsParBarquette, serviceDepuisArticle, LIBELLES };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Calcul = api;
+})(typeof self !== 'undefined' ? self : this);
+</script>
+<script>/* recettes.js — choix des recettes du catalogue pour un planning (SPEC §6).
+ * Logique pure, navigateur (window.Recettes) et Node.
+ */
+(function (root) {
+  'use strict';
+
+  // Articles du catalogue éligibles pour un service.
+  // filtre : { gamme, format, pauvreEnSel, exclureCategories: [] }
+  function filtrer(catalogue, filtre) {
+    const exclues = new Set(filtre.exclureCategories || []);
+    return catalogue.filter((a) =>
+      a.gamme === filtre.gamme && a.format === filtre.format &&
+      (!filtre.pauvreEnSel || a.pauvre_en_sel) && !exclues.has(a.categorie));
+  }
+
+  // Attribue un article à chaque recette du planning (numéros 1..n).
+  // - jamais la même catégorie deux jours de suite si on peut l'éviter,
+  // - catégories réparties au plus équitablement (terre / mer / végétarien…),
+  // - `dejaUtilises` : codes déjà pris par l'autre service.
+  // Renvoie { choix: [{numero, article}], manque } ; manque > 0 si le catalogue est trop court.
+  function proposer(planning, pool, dejaUtilises) {
+    const pris = new Set(dejaUtilises || []);
+    const dispo = pool.filter((a) => !pris.has(a.code));
+    const nb = new Set(planning.map((j) => j.recette)).size;
+    const choix = new Map();
+    const parCat = {};
+    let precedente = null;
+
+    for (const j of planning) {
+      let art = choix.get(j.recette);
+      if (!art && dispo.length) {
+        let meilleur = null, score = Infinity;
+        for (const a of dispo) {
+          const s = (a.categorie === precedente ? 1000 : 0) + (parCat[a.categorie] || 0) * 10;
+          if (s < score) { score = s; meilleur = a; }
+        }
+        art = meilleur;
+        dispo.splice(dispo.indexOf(art), 1);
+        choix.set(j.recette, art);
+        parCat[art.categorie] = (parCat[art.categorie] || 0) + 1;
+      }
+      precedente = art ? art.categorie : null;
+    }
+    const liste = [...choix.entries()].sort((a, b) => a[0] - b[0]).map(([numero, article]) => ({ numero, article }));
+    return { choix: liste, manque: nb - liste.length };
+  }
+
+  // Articles de la même gamme/format non encore utilisés (liste déroulante de remplacement).
+  function alternatives(pool, utilises, articleActuel) {
+    const pris = new Set(utilises);
+    return pool.filter((a) => a.code === (articleActuel && articleActuel.code) || !pris.has(a.code));
+  }
+
+  const api = { filtrer, proposer, alternatives };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Recettes = api;
+})(typeof self !== 'undefined' ? self : this);
+</script>
+<script>
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const JOURS = ['dim', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam'];
+  const JOURS_LONGS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+  const CAT = window.CATALOGUE;
+  const FORMATS = [...new Map(CAT.map((a) => [a.gamme + '|' + a.format, { gamme: a.gamme, format: a.format }])).values()];
+  const CATEGORIES = ['terre', 'mer', 'végétarien', 'pâtes', 'ailleurs'];
+  const SERVICES = ['midi', 'soir'];
+  let etat = null;   // { params, result, jours (dates), choixOption, selection }
+
+  /* ---------- formulaire ---------- */
+  $('jours').innerHTML = [1, 2, 3, 4, 5, 6, 0].map((d) => `<label><input type="checkbox" data-j="${d}" checked> ${JOURS[d]}</label>`).join('');
+  $('cats').innerHTML = CATEGORIES.map((c) => `<label><input type="checkbox" data-cat="${c}"> ${c}</label>`).join('');
+  const demain = new Date(); demain.setDate(demain.getDate() + 1);
+  $('livraison').value = demain.toISOString().slice(0, 10);
+
+  SERVICES.forEach((s, i) => {
+    $('svc-' + s).innerHTML = `
+      <label><input type="checkbox" id="${s}-on" ${i === 0 ? 'checked' : ''}> ${s === 'midi' ? 'Midi' : 'Soir'}</label>
+      <div class="ligne"><div><label>Résidents</label><input type="number" id="${s}-n" min="1" value="25"></div>
+      <div><label>Gamme / format</label><select id="${s}-fmt">${FORMATS.map((f, k) => `<option value="${k}">${f.gamme} ${f.format}</option>`).join('')}</select></div></div>
+      <div id="${s}-gr" hidden><label>Grammage d'une portion (g)</label>
+        <div class="ligne"><input type="number" id="${s}-g" min="30" max="500" value="100"><button type="button" class="sec" data-g="80" data-s="${s}">80 g</button><button type="button" class="sec" data-g="100" data-s="${s}">100 g</button></div></div>`;
+    const fmt = $(s + '-fmt');
+    fmt.value = String(FORMATS.findIndex((f) => (s === 'midi' ? f.format === '300g cassolette' && f.gamme === 'Plats complets' : f.gamme === 'Veloutines')));
+    fmt.onchange = () => majGrammage(s);
+    majGrammage(s);
+  });
+  function majGrammage(s) { $(s + '-gr').hidden = FORMATS[+$(s + '-fmt').value].format !== 'barquette 1kg'; }
+  document.querySelectorAll('button[data-g]').forEach((b) => { b.onclick = () => { $(b.dataset.s + '-g').value = b.dataset.g; }; });
+  $('tol').oninput = () => { $('tolVal').textContent = $('tol').value; };
+
+  function joursDeService() {
+    const coches = new Set([...document.querySelectorAll('#jours input:checked')].map((i) => +i.dataset.j));
+    const dateLiv = new Date($('livraison').value + 'T12:00:00');
+    const dlc = +$('dlc').value, dates = [];
+    for (let i = 1; i <= dlc; i++) {
+      const d = new Date(dateLiv); d.setDate(d.getDate() + i);
+      if (coches.has(d.getDay())) dates.push(d);
+    }
+    return dates;
+  }
+  function majInfoJ() {
+    const j = joursDeService();
+    $('infoJ').textContent = j.length ? `J = ${j.length} jours de service (du ${fmtDate(j[0])} au ${fmtDate(j[j.length - 1])}). Le jour de livraison n'est pas servi.` : 'Aucun jour de service dans la période.';
+  }
+  ['jours', 'livraison', 'dlc'].forEach((id) => $(id).addEventListener('change', majInfoJ));
+  const fmtDate = (d) => `${JOURS[d.getDay()]} ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+  majInfoJ();
+
+  /* ---------- calcul ---------- */
+  function lireParams() {
+    const dates = joursDeService();
+    if (!dates.length) throw new Error('Aucun jour de service dans la période.');
+    const p = { jours: dates.length, tolerance: +$('tol').value, services: {} };
+    const cfg = { jours: p.jours, tolerance: p.tolerance };
+    for (const s of SERVICES) {
+      if (!$(s + '-on').checked) continue;
+      const n = +$(s + '-n').value;
+      if (!(n > 0)) throw new Error('Nombre de résidents invalide (' + s + ').');
+      const f = FORMATS[+$(s + '-fmt').value];
+      const exemple = CAT.find((a) => a.gamme === f.gamme && a.format === f.format);
+      const g = +$(s + '-g').value;
+      if (exemple.multiportion && !(g >= 30 && g <= 500)) throw new Error('Grammage invalide (' + s + ').');
+      cfg[s] = Calcul.serviceDepuisArticle(exemple, n, g);
+      p.services[s] = { f, grammage: exemple.multiportion ? g : null };
+    }
+    if (!Object.keys(p.services).length) throw new Error('Active au moins un service (midi ou soir).');
+    return { p, cfg, dates };
+  }
+
+  $('go').onclick = () => {
+    $('erreur').textContent = '';
+    try {
+      const { p, cfg, dates } = lireParams();
+      const result = Calcul.calculer(cfg);
+      const filtreBase = { pauvreEnSel: $('sel').checked, exclureCategories: [...document.querySelectorAll('#cats input:checked')].map((i) => i.dataset.cat) };
+      const pools = {};
+      for (const s of Object.keys(p.services)) {
+        pools[s] = Recettes.filtrer(CAT, Object.assign({ gamme: p.services[s].f.gamme, format: p.services[s].f.format }, filtreBase));
+      }
+      const tolerances = [...new Set([0, 2, 4, 7, 10, +$('tol').value])].sort((a, b) => a - b).map((t) => {
+        const r = Calcul.calculer(Object.assign({}, cfg, { tolerance: t }));
+        return { t, e: r.front[0] };
+      });
+      etat = { p, cfg, dates, result, pools, tolerances, choix: 0, selection: {}, etab: $('etab').value.trim() };
+      proposer();
+      rendre();
+    } catch (e) { $('erreur').textContent = e.message; }
+  };
+
+  // Recettes proposées automatiquement pour l'option choisie (midi d'abord, soir évite les mêmes codes).
+  function proposer() {
+    const opt = etat.result.options[etat.choix];
+    etat.selection = {}; etat.manque = {};
+    const utilises = [];
+    for (const s of Object.keys(opt.services)) {
+      const r = Recettes.proposer(opt.services[s].planning, etat.pools[s], utilises);
+      etat.selection[s] = {}; etat.manque[s] = r.manque;
+      r.choix.forEach((c) => { etat.selection[s][c.numero] = c.article.code; utilises.push(c.article.code); });
+    }
+  }
+
+  /* ---------- rendu ---------- */
+  const NOM = { midi: 'Midi', soir: 'Soir' };
+  const article = (code) => CAT.find((a) => a.code === code);
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  function rendre() {
+    $('resultats').hidden = false;
+    const { result } = etat;
+    $('tabOptions').innerHTML = '<tr><th>Option</th><th class="n">Recettes</th><th class="n">Cartons</th><th class="n">Pertes (portions)</th><th class="n">Repas mixtes</th></tr>' +
+      result.options.map((o, i) => `<tr class="cliquable ${i === etat.choix ? 'choisi' : ''}" data-i="${i}"><td>${o.labels.map((l) => `<span class="tag">${Calcul.LIBELLES[l]}</span>`).join('')}</td>
+        <td class="n">${o.recettes}</td><td class="n">${o.cartons}</td><td class="n">${o.pertes}</td><td class="n">${o.repasMixtes}</td></tr>`).join('');
+    $('tabOptions').querySelectorAll('tr[data-i]').forEach((tr) => { tr.onclick = () => { etat.choix = +tr.dataset.i; proposer(); rendre(); }; });
+
+    $('tabTol').innerHTML = '<tr><th>Tolérance</th><th class="n">Recettes</th><th class="n">Cartons</th><th class="n">Pertes</th><th class="n">Repas mixtes</th></tr>' +
+      etat.tolerances.map(({ t, e }) => `<tr class="${t === etat.cfg.tolerance ? 'choisi' : ''}"><td>${t} résident(s)</td><td class="n">${e.recettes}</td><td class="n">${e.cartons}</td><td class="n">${e.pertes}</td><td class="n">${e.repasMixtes}</td></tr>`).join('');
+
+    const opt = result.options[etat.choix];
+    $('titreImpr').hidden = false;
+    $('titreImpr').textContent = `Commande ${etat.etab || ''} — livraison ${etat.dates.length ? new Date($('livraison').value + 'T12:00:00').toLocaleDateString('fr-FR') : ''}`.trim();
+    let bon = '<tr><th>Service</th><th>Code</th><th>Libellé</th><th class="n">Cartons</th><th class="n">Portions</th></tr>';
+    for (const s of Object.keys(opt.services)) {
+      const utilises = Object.values(etat.selection[s]).concat(Object.values(etat.selection[s === 'midi' ? 'soir' : 'midi'] || {}));
+      for (const d of opt.services[s].detail) {
+        const code = etat.selection[s][d.numero], a = article(code);
+        const alts = a ? Recettes.alternatives(etat.pools[s], utilises, a) : [];
+        bon += `<tr><td>${NOM[s]}</td><td>${a ? esc(a.code) : '—'}</td><td>${a ? `<select class="rempl" data-s="${s}" data-n="${d.numero}">${alts.map((x) => `<option value="${esc(x.code)}" ${x.code === code ? 'selected' : ''}>${esc(x.libelle)} · ${x.categorie}</option>`).join('')}</select>` : '<span class="erreur">Plus de recette disponible dans le catalogue</span>'}</td>
+          <td class="n">${d.cartons}</td><td class="n">${d.portions}</td></tr>`;
+      }
+    }
+    $('tabBon').innerHTML = bon;
+    $('tabBon').querySelectorAll('select.rempl').forEach((sel) => { sel.onchange = () => { etat.selection[sel.dataset.s][sel.dataset.n] = sel.value; rendre(); }; });
+    const manques = Object.entries(etat.manque).filter(([, m]) => m > 0).map(([s, m]) => `${NOM[s]} : ${m} recette(s) manquante(s)`);
+    $('totaux').innerHTML = `Total : <b>${opt.recettes}</b> recettes, <b>${opt.cartons}</b> cartons, <b>${opt.pertes}</b> portions de pertes, <b>${opt.repasMixtes}</b> repas mixtes.` +
+      (manques.length ? ` <span class="erreur">Catalogue insuffisant (${manques.join(' ; ')}) : assouplis les filtres.</span>` : '');
+
+    let pl = '<tr><th>Jour</th><th>Service</th><th>Recette</th><th>Résidents servis</th></tr>';
+    for (const s of Object.keys(opt.services)) {
+      for (const j of opt.services[s].planning) {
+        const code = (n) => esc(etat.selection[s][n] || ('#' + n));
+        const detail = j.servis.map((x) => x.type === 'plat' ? `${x.residents} sur ${code(x.recette)}` : `<span class="reste">${x.residents} sur reste ${code(x.recette)}</span>`).join(' + ');
+        pl += `<tr><td>${fmtDate(etat.dates[j.jour - 1])}</td><td>${NOM[s]}</td><td>${code(j.recette)}</td><td>${detail}</td></tr>`;
+      }
+    }
+    $('tabPlanning').innerHTML = pl;
+  }
+
+  /* ---------- exports ---------- */
+  function lignes() {
+    const opt = etat.result.options[etat.choix], bon = [['Service', 'Code', 'Libellé', 'Cartons', 'Portions']], plan = [['Jour', 'Service', 'Recette', 'Résidents servis']];
+    for (const s of Object.keys(opt.services)) {
+      for (const d of opt.services[s].detail) { const a = article(etat.selection[s][d.numero]); bon.push([NOM[s], a ? a.code : '', a ? a.libelle : '', d.cartons, d.portions]); }
+      for (const j of opt.services[s].planning) {
+        const c = (n) => etat.selection[s][n] || ('#' + n);
+        plan.push([fmtDate(etat.dates[j.jour - 1]), NOM[s], c(j.recette), j.servis.map((x) => `${x.residents} ${x.type === 'plat' ? 'sur' : 'sur reste'} ${c(x.recette)}`).join(' + ')]);
+      }
+    }
+    return { bon, plan };
+  }
+  const tsv = (rows) => rows.map((r) => r.join('\t')).join('\n');
+  const csvTxt = (rows) => rows.map((r) => r.map((c) => '"' + String(c).replace(/"/g, '""') + '"').join(';')).join('\r\n');
+  const msg = (t) => { $('msg').textContent = t; setTimeout(() => { $('msg').textContent = ''; }, 3000); };
+
+  $('copier').onclick = async () => {
+    const { bon, plan } = lignes();
+    const texte = `${etat.etab}\n\nBON DE COMMANDE\n${tsv(bon)}\n\nPLANNING\n${tsv(plan)}`;
+    try { await navigator.clipboard.writeText(texte); msg('Copié dans le presse-papier.'); }
+    catch (e) { const t = document.createElement('textarea'); t.value = texte; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); msg('Copié.'); }
+  };
+  $('csv').onclick = () => {
+    const { bon, plan } = lignes();
+    const blob = new Blob(['﻿' + csvTxt(bon) + '\r\n\r\n' + csvTxt(plan)], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = 'commande-' + (etat.etab || 'nutrisens').replace(/[^\w-]+/g, '_') + '.csv'; a.click(); URL.revokeObjectURL(a.href);
+  };
+  $('imprimer').onclick = () => window.print();
+})();
+</script>
+</body>
+</html>
