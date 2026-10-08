@@ -18,5 +18,10 @@ Voir `SPEC.md` pour le besoin. Ouvrir `index.html` dans un navigateur (aucune in
 - `pauvre_en_sel` et `duo` viennent des titres de section de la page « Codes produits ».
 - Plats pauvres en sel 300 g : supposés en cassolette (le catalogue ne précise pas).
 - « Onctueux sucrés » (180 g) exclus : desserts, hors V1.
-- Option *compromis* / *zéro repas mixte* : point du front de Pareto le plus proche de l'idéal (critères normalisés, poids égaux) — heuristique, pas définie par la spec.
-- Catalogue frais insuffisant (ex. 13 veloutines pour 15 jours de service) : l'interface signale les recettes manquantes au lieu de répéter un code.
+- Pas de tolérance à saisir : la page calcule des scénarios (0, 1, 2… 10 résidents max sur un reste), garde ceux qui sont distincts et affiche le plus varié de chacun (`Calcul.scenarios`).
+- Catalogue insuffisant (ex. 13 veloutines pour 15 jours) : des recettes sont resservies, en priorité les « valeurs sûres » (`valeur_sure` dans `catalogue.json`, liste dans `scripts/extract_catalogue.py` : 3 validées sur le terrain, les autres à confirmer), jamais deux jours de suite.
+- Bon de commande : une ligne par code article, avec les portions restantes en fin de période.
+
+## Retours terrain à traiter plus tard
+- Pas la même viande midi et soir le même jour (ex. poulet / poulet).
+- Panachage : 2 ou 3 gammes au choix pour un même service (rare en pratique).

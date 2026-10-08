@@ -25,6 +25,16 @@ SECTIONS = {
     'VELOUTINES SALÉES - FRAIS (180G)':                   ('Veloutines', '180g cassolette', 9, None, False, False),
 }
 
+# Recettes « valeurs sûres » (bien consommées), resservies en priorité quand le catalogue
+# n'a pas assez de recettes pour couvrir la période. Libellés normalisés (sans accents).
+# Les 3 premières viennent du terrain ; les autres sont des classiques à valider.
+VALEURS_SURES = [
+    'poulet et petits legumes', 'quiche lorraine', 'dinde a la mediterraneenne',
+    'poulet roti haricots verts', 'dinde petits legumes', 'dinde aux petits legumes',
+    'blanquette de veau', 'parmentier de boeuf', 'hachis parmentier', 'boeuf bourguignon',
+    'veau carottes', 'boeuf roti haricots verts',
+]
+
 def norm(s):
     s = s.lower().replace('œ', 'oe')
     return unicodedata.normalize('NFD', s).encode('ascii', 'ignore').decode()
@@ -64,6 +74,7 @@ def main(pdf_path, out_path):
                 items.append(dict(code=first, libelle=libelle, gamme=gamme, format=fmt,
                                   portions_par_carton=ppc, categorie=categorie(libelle),
                                   pauvre_en_sel=sel, duo=duo,
+                                  valeur_sure=any(v in norm(libelle) for v in VALEURS_SURES),
                                   **({'multiportion': True, 'barquettes_par_carton': bpc, 'poids_barquette_g': 1000} if bpc else {})))
             elif section in SECTIONS:
                 print('ligne ignorée :', section, '|', text, file=sys.stderr)

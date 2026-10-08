@@ -54,9 +54,6 @@
   <div class="service" id="svc-midi"></div>
   <div class="service" id="svc-soir"></div>
 
-  <label for="tol">Tolérance repas mixtes : <b id="tolVal">0</b> résident(s) max sur un reste</label>
-  <input type="range" id="tol" min="0" max="15" value="0" style="width:100%">
-
   <h3>Options</h3>
   <label style="display:flex;gap:6px;align-items:center;color:var(--texte)"><input type="checkbox" id="sel"> Pauvre en sel uniquement</label>
   <label>Exclure des catégories</label>
@@ -67,11 +64,9 @@
 
 <div class="pile" id="resultats" hidden>
   <section>
-    <h2>1 · Comparatif des options</h2>
-    <p class="note">Clique une ligne pour choisir l'option.</p>
-    <table id="tabOptions"></table>
-    <h3>Impact de la tolérance (variété max)</h3>
-    <table id="tabTol"></table>
+    <h2>1 · Scénarios</h2>
+    <p class="note">Chaque scénario sert une recette par jour. Plus on accepte que quelques résidents mangent un reste d'un plat déjà ouvert, moins on commande et moins on jette. Clique une ligne pour voir sa commande et son planning.</p>
+    <table id="tabScenarios"></table>
   </section>
   <section>
     <h2>2 · Bon de commande</h2>
@@ -98,12 +93,11 @@
   'use strict';
   const $ = (id) => document.getElementById(id);
   const JOURS = ['dim', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam'];
-  const JOURS_LONGS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
   const CAT = window.CATALOGUE;
   const FORMATS = [...new Map(CAT.map((a) => [a.gamme + '|' + a.format, { gamme: a.gamme, format: a.format }])).values()];
   const CATEGORIES = ['terre', 'mer', 'végétarien', 'pâtes', 'ailleurs'];
   const SERVICES = ['midi', 'soir'];
-  let etat = null;   // { params, result, jours (dates), choixOption, selection }
+  let etat = null;   // { p, cfg, dates, scenarios, pools, choix, selection }
 
   /* ---------- formulaire ---------- */
   $('jours').innerHTML = [1, 2, 3, 4, 5, 6, 0].map((d) => `<label><input type="checkbox" data-j="${d}" checked> ${JOURS[d]}</label>`).join('');
@@ -125,7 +119,6 @@
   });
   function majGrammage(s) { $(s + '-gr').hidden = FORMATS[+$(s + '-fmt').value].format !== 'barquette 1kg'; }
   document.querySelectorAll('button[data-g]').forEach((b) => { b.onclick = () => { $(b.dataset.s + '-g').value = b.dataset.g; }; });
-  $('tol').oninput = () => { $('tolVal').textContent = $('tol').value; };
 
   function joursDeService() {
     const coches = new Set([...document.querySelectorAll('#jours input:checked')].map((i) => +i.dataset.j));
@@ -149,8 +142,8 @@
   function lireParams() {
     const dates = joursDeService();
     if (!dates.length) throw new Error('Aucun jour de service dans la période.');
-    const p = { jours: dates.length, tolerance: +$('tol').value, services: {} };
-    const cfg = { jours: p.jours, tolerance: p.tolerance };
+    const p = { jours: dates.length, services: {} };
+    const cfg = { jours: p.jours };
     for (const s of SERVICES) {
       if (!$(s + '-on').checked) continue;
       const n = +$(s + '-n').value;
@@ -170,32 +163,52 @@
     $('erreur').textContent = '';
     try {
       const { p, cfg, dates } = lireParams();
-      const result = Calcul.calculer(cfg);
+      const scenarios = Calcul.scenarios(cfg);
       const filtreBase = { pauvreEnSel: $('sel').checked, exclureCategories: [...document.querySelectorAll('#cats input:checked')].map((i) => i.dataset.cat) };
       const pools = {};
       for (const s of Object.keys(p.services)) {
         pools[s] = Recettes.filtrer(CAT, Object.assign({ gamme: p.services[s].f.gamme, format: p.services[s].f.format }, filtreBase));
+        if (!pools[s].length) throw new Error(`Aucune recette ${p.services[s].f.gamme} ${p.services[s].f.format} avec ces filtres (${s}).`);
       }
-      const tolerances = [...new Set([0, 2, 4, 7, 10, +$('tol').value])].sort((a, b) => a - b).map((t) => {
-        const r = Calcul.calculer(Object.assign({}, cfg, { tolerance: t }));
-        return { t, e: r.front[0] };
-      });
-      etat = { p, cfg, dates, result, pools, tolerances, choix: 0, selection: {}, etab: $('etab').value.trim() };
+      etat = { p, cfg, dates, scenarios, pools, choix: 0, selection: {}, etab: $('etab').value.trim() };
       proposer();
       rendre();
     } catch (e) { $('erreur').textContent = e.message; }
   };
 
-  // Recettes proposées automatiquement pour l'option choisie (midi d'abord, soir évite les mêmes codes).
+  // Recettes proposées automatiquement pour le scénario choisi (midi d'abord, le soir évite les mêmes codes).
   function proposer() {
-    const opt = etat.result.options[etat.choix];
-    etat.selection = {}; etat.manque = {};
+    const sc = etat.scenarios[etat.choix];
+    etat.selection = {}; etat.repetees = {};
     const utilises = [];
-    for (const s of Object.keys(opt.services)) {
-      const r = Recettes.proposer(opt.services[s].planning, etat.pools[s], utilises);
-      etat.selection[s] = {}; etat.manque[s] = r.manque;
+    for (const s of Object.keys(sc.services)) {
+      const r = Recettes.proposer(sc.services[s].planning, etat.pools[s], utilises);
+      etat.selection[s] = {}; etat.repetees[s] = r.repetees;
       r.choix.forEach((c) => { etat.selection[s][c.numero] = c.article.code; utilises.push(c.article.code); });
     }
+  }
+
+  // Lignes du bon de commande d'un service : une ligne par code article (recettes resservies regroupées).
+  function lignesBon(s) {
+    const parCode = new Map();
+    for (const d of etat.scenarios[etat.choix].services[s].detail) {
+      const code = etat.selection[s][d.numero];
+      const l = parCode.get(code) || { code, numeros: [], cartons: 0, portions: 0, restes: 0, jours: [] };
+      l.numeros.push(d.numero); l.cartons += d.cartons; l.portions += d.portions; l.restes += d.pertes; l.jours.push(...d.jours);
+      parCode.set(code, l);
+    }
+    return [...parCode.values()];
+  }
+
+  // Résidents servis un jour, regroupés par code (un reste du même plat compte comme le plat du jour).
+  function servisParCode(s, j) {
+    const sel = etat.selection[s], plat = sel[j.recette], m = new Map([[plat, { code: plat, residents: 0, reste: false }]]);
+    for (const x of j.servis) {
+      const code = sel[x.recette];
+      const e = m.get(code) || { code, residents: 0, reste: true };
+      e.residents += x.residents; m.set(code, e);
+    }
+    return [...m.values()];
   }
 
   /* ---------- rendu ---------- */
@@ -205,40 +218,39 @@
 
   function rendre() {
     $('resultats').hidden = false;
-    const { result } = etat;
-    $('tabOptions').innerHTML = '<tr><th>Option</th><th class="n">Recettes</th><th class="n">Cartons</th><th class="n">Pertes (portions)</th><th class="n">Repas mixtes</th></tr>' +
-      result.options.map((o, i) => `<tr class="cliquable ${i === etat.choix ? 'choisi' : ''}" data-i="${i}"><td>${o.labels.map((l) => `<span class="tag">${Calcul.LIBELLES[l]}</span>`).join('')}</td>
-        <td class="n">${o.recettes}</td><td class="n">${o.cartons}</td><td class="n">${o.pertes}</td><td class="n">${o.repasMixtes}</td></tr>`).join('');
-    $('tabOptions').querySelectorAll('tr[data-i]').forEach((tr) => { tr.onclick = () => { etat.choix = +tr.dataset.i; proposer(); rendre(); }; });
+    $('tabScenarios').innerHTML = '<tr><th>Scénario</th><th class="n">Résidents max sur un reste, par repas</th><th class="n">Recettes</th><th class="n">Cartons</th><th class="n">Portions jetées</th><th class="n">Repas avec restes</th></tr>' +
+      etat.scenarios.map((o, i) => `<tr class="cliquable ${i === etat.choix ? 'choisi' : ''}" data-i="${i}"><td>${String.fromCharCode(65 + i)}${o.resteMax === 0 ? ' <span class="tag">aucun reste servi</span>' : ''}${i === etat.scenarios.length - 1 && i > 0 ? ' <span class="tag">le plus économe</span>' : ''}</td>
+        <td class="n">${o.resteMax}</td><td class="n">${o.recettes}</td><td class="n">${o.cartons}</td><td class="n">${o.pertes}</td><td class="n">${o.repasMixtes}</td></tr>`).join('');
+    $('tabScenarios').querySelectorAll('tr[data-i]').forEach((tr) => { tr.onclick = () => { etat.choix = +tr.dataset.i; proposer(); rendre(); }; });
 
-    $('tabTol').innerHTML = '<tr><th>Tolérance</th><th class="n">Recettes</th><th class="n">Cartons</th><th class="n">Pertes</th><th class="n">Repas mixtes</th></tr>' +
-      etat.tolerances.map(({ t, e }) => `<tr class="${t === etat.cfg.tolerance ? 'choisi' : ''}"><td>${t} résident(s)</td><td class="n">${e.recettes}</td><td class="n">${e.cartons}</td><td class="n">${e.pertes}</td><td class="n">${e.repasMixtes}</td></tr>`).join('');
-
-    const opt = result.options[etat.choix];
+    const opt = etat.scenarios[etat.choix];
     $('titreImpr').hidden = false;
     $('titreImpr').textContent = `Commande ${etat.etab || ''} — livraison ${etat.dates.length ? new Date($('livraison').value + 'T12:00:00').toLocaleDateString('fr-FR') : ''}`.trim();
-    let bon = '<tr><th>Service</th><th>Code</th><th>Libellé</th><th class="n">Cartons</th><th class="n">Portions</th></tr>';
+    let bon = '<tr><th>Service</th><th>Code</th><th>Libellé</th><th class="n">Cartons</th><th class="n">Portions</th><th class="n">Restes en fin de période</th></tr>';
     for (const s of Object.keys(opt.services)) {
-      const utilises = Object.values(etat.selection[s]).concat(Object.values(etat.selection[s === 'midi' ? 'soir' : 'midi'] || {}));
-      for (const d of opt.services[s].detail) {
-        const code = etat.selection[s][d.numero], a = article(code);
-        const alts = a ? Recettes.alternatives(etat.pools[s], utilises, a) : [];
-        bon += `<tr><td>${NOM[s]}</td><td>${a ? esc(a.code) : '—'}</td><td>${a ? `<select class="rempl" data-s="${s}" data-n="${d.numero}">${alts.map((x) => `<option value="${esc(x.code)}" ${x.code === code ? 'selected' : ''}>${esc(x.libelle)} · ${x.categorie}</option>`).join('')}</select>` : '<span class="erreur">Plus de recette disponible dans le catalogue</span>'}</td>
-          <td class="n">${d.cartons}</td><td class="n">${d.portions}</td></tr>`;
+      for (const l of lignesBon(s)) {
+        bon += `<tr><td>${NOM[s]}</td><td>${esc(l.code)}</td><td><select class="rempl" data-s="${s}" data-code="${esc(l.code)}">${etat.pools[s].map((x) => `<option value="${esc(x.code)}" ${x.code === l.code ? 'selected' : ''}>${esc(x.libelle)} · ${x.categorie}</option>`).join('')}</select>${l.numeros.length > 1 ? ` <span class="tag">servie ${l.numeros.length} fois</span>` : ''}</td>
+          <td class="n">${l.cartons}</td><td class="n">${l.portions}</td><td class="n ${l.restes ? 'reste' : ''}">${l.restes ? l.restes + ' portion' + (l.restes > 1 ? 's' : '') : '—'}</td></tr>`;
       }
     }
     $('tabBon').innerHTML = bon;
-    $('tabBon').querySelectorAll('select.rempl').forEach((sel) => { sel.onchange = () => { etat.selection[sel.dataset.s][sel.dataset.n] = sel.value; rendre(); }; });
-    const manques = Object.entries(etat.manque).filter(([, m]) => m > 0).map(([s, m]) => `${NOM[s]} : ${m} recette(s) manquante(s)`);
-    $('totaux').innerHTML = `Total : <b>${opt.recettes}</b> recettes, <b>${opt.cartons}</b> cartons, <b>${opt.pertes}</b> portions de pertes, <b>${opt.repasMixtes}</b> repas mixtes.` +
-      (manques.length ? ` <span class="erreur">Catalogue insuffisant (${manques.join(' ; ')}) : assouplis les filtres.</span>` : '');
+    $('tabBon').querySelectorAll('select.rempl').forEach((sel) => {
+      sel.onchange = () => {
+        const sv = etat.selection[sel.dataset.s];
+        for (const n of Object.keys(sv)) if (sv[n] === sel.dataset.code) sv[n] = sel.value;
+        rendre();
+      };
+    });
+    const rep = Object.entries(etat.repetees).filter(([, m]) => m > 0).map(([s, m]) => `${NOM[s]} : ${m}`);
+    const nbCodes = Object.keys(opt.services).reduce((a, s) => a + lignesBon(s).length, 0);
+    $('totaux').innerHTML = `Total : <b>${nbCodes}</b> références, <b>${opt.cartons}</b> cartons. Restes en fin de période : <b>${opt.pertes}</b> portion(s) non consommée(s) (détail dans la dernière colonne). <b>${opt.repasMixtes}</b> repas où quelques résidents mangent un reste.` +
+      (rep.length ? `<br>Pas assez de recettes différentes au catalogue pour toute la période : des valeurs sûres sont resservies (${rep.join(' ; ')}).` : '');
 
     let pl = '<tr><th>Jour</th><th>Service</th><th>Recette</th><th>Résidents servis</th></tr>';
     for (const s of Object.keys(opt.services)) {
       for (const j of opt.services[s].planning) {
-        const code = (n) => esc(etat.selection[s][n] || ('#' + n));
-        const detail = j.servis.map((x) => x.type === 'plat' ? `${x.residents} sur ${code(x.recette)}` : `<span class="reste">${x.residents} sur reste ${code(x.recette)}</span>`).join(' + ');
-        pl += `<tr><td>${fmtDate(etat.dates[j.jour - 1])}</td><td>${NOM[s]}</td><td>${code(j.recette)}</td><td>${detail}</td></tr>`;
+        const detail = servisParCode(s, j).map((x) => x.reste ? `<span class="reste">${x.residents} sur reste ${esc(x.code)}</span>` : `${x.residents} sur ${esc(x.code)}`).join(' + ');
+        pl += `<tr><td>${fmtDate(etat.dates[j.jour - 1])}</td><td>${NOM[s]}</td><td>${esc(etat.selection[s][j.recette])}</td><td>${detail}</td></tr>`;
       }
     }
     $('tabPlanning').innerHTML = pl;
@@ -246,12 +258,11 @@
 
   /* ---------- exports ---------- */
   function lignes() {
-    const opt = etat.result.options[etat.choix], bon = [['Service', 'Code', 'Libellé', 'Cartons', 'Portions']], plan = [['Jour', 'Service', 'Recette', 'Résidents servis']];
+    const opt = etat.scenarios[etat.choix], bon = [['Service', 'Code', 'Libellé', 'Cartons', 'Portions', 'Restes fin de période']], plan = [['Jour', 'Service', 'Recette', 'Résidents servis']];
     for (const s of Object.keys(opt.services)) {
-      for (const d of opt.services[s].detail) { const a = article(etat.selection[s][d.numero]); bon.push([NOM[s], a ? a.code : '', a ? a.libelle : '', d.cartons, d.portions]); }
+      for (const l of lignesBon(s)) bon.push([NOM[s], l.code, article(l.code).libelle, l.cartons, l.portions, l.restes]);
       for (const j of opt.services[s].planning) {
-        const c = (n) => etat.selection[s][n] || ('#' + n);
-        plan.push([fmtDate(etat.dates[j.jour - 1]), NOM[s], c(j.recette), j.servis.map((x) => `${x.residents} ${x.type === 'plat' ? 'sur' : 'sur reste'} ${c(x.recette)}`).join(' + ')]);
+        plan.push([fmtDate(etat.dates[j.jour - 1]), NOM[s], etat.selection[s][j.recette], servisParCode(s, j).map((x) => `${x.residents} ${x.reste ? 'sur reste' : 'sur'} ${x.code}`).join(' + ')]);
       }
     }
     return { bon, plan };
